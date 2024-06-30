@@ -21,7 +21,7 @@ final class OpenAIChat extends BaseLLM
     private OpenAIChatModel $model;
     private array $modelAdditionalParams = [];
     private int $maxRetries = 6;
-    private array $prefixMessages = [];
+    private array $chatHistory = [];
 
     private ?string $openaiApiKey;
 
@@ -54,9 +54,15 @@ final class OpenAIChat extends BaseLLM
 
     public function generateResult(array $prompts, array $stop = null): LLMResult
     {
+        // Add the new prompt to the chat history
+        $this->chatHistory[] = ['role' => 'user', 'content' => $prompts[0]];
+
         [$messages, $params] = $this->getChatParams($prompts, $stop);
 
         $fullResponse = $this->completionWithRetry($this->client, $messages, ...$params);
+
+        // Add the model's response to the chat history
+        $this->chatHistory[] = ['role' => 'assistant', 'content' => $fullResponse['choices'][0]['message']['content']];
 
         $generations = [
             [
@@ -74,7 +80,7 @@ final class OpenAIChat extends BaseLLM
 
     private function completionWithRetry($client, $params, ...$kwargs)
     {
-        $params = array_merge($kwargs, ['messages' => [$params]]);
+        $params = array_merge($kwargs, ['messages' => $params]);
         $backoff = new Backoff($this->maxRetries, 'exponential', 10000, true);
         $result = $backoff->run(function () use ($client, $params) {
             return $client->chat()->create($params);
@@ -108,8 +114,8 @@ final class OpenAIChat extends BaseLLM
         }
 
         $messages = array_merge(
-            $this->prefixMessages,
-            ['role' => 'user', 'content' => $prompts[0]]
+            $this->chatHistory,
+            [['role' => 'user', 'content' => $prompts[0]]]
         );
 
         $params = array_merge(['model' => $this->model->value], $this->defaultParams());
@@ -127,6 +133,11 @@ final class OpenAIChat extends BaseLLM
         }
 
         return [$messages, $params];
+    }
+
+    public function getChatHistory(): array
+    {
+        return $this->chatHistory;
     }
 
     public function llmType(): string
